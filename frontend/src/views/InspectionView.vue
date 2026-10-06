@@ -4,42 +4,39 @@ import { ElMessage } from 'element-plus'
 import api from '../api'
 import BatchDetail from '../components/inspection/BatchDetail.vue'
 import { BATCH_STATUS, batchStatusTagType } from '../utils/inspection'
+import { createBatchListController } from '../utils/batchListController'
 
 const props = defineProps({ tenant: String })
 
-const rows = ref([])
-const loading = ref(false)
-const total = ref(0)
+// 列表查询状态：筛选条件与分页集中在一处，任何请求都从这里装配参数，
+// 翻页/改页大小只动分页字段，搜索/切状态/勾选只看过期未执行一律回到第 1 页。
 const query = reactive({
   status: '',
   keyword: '',
   overdueOnly: false,
   page: 1,
-  size: 10
+  size: 10,
+  rows: [],
+  total: 0,
+  loading: false,
+  error: ''
 })
 
-async function load() {
-  loading.value = true
-  try {
-    const data = await api.listBatches({
-      status: query.status || undefined,
-      keyword: query.key || undefined,
-      overdueOnly: query.overdueOnly || undefined,
-      page: query.page - 1,
-      size: query.size
-    })
-    rows.value = data.items || []
-    total.value = data.total || 0
-  } catch (e) {
-    ElMessage.error(e.message)
-  } finally {
-    loading.value = false
-  }
-}
+const controller = createBatchListController({
+  api,
+  state: query,
+  notify: (msg) => ElMessage.error(msg)
+})
+const load = controller.load
 
 function search() {
-  query.page = 1
-  load()
+  return controller.search()
+}
+function onPageChange(page) {
+  return controller.changePage(page)
+}
+function onSizeChange(size) {
+  return controller.changeSize(size)
 }
 
 // ---------------- 详情抽屉 ----------------
@@ -148,7 +145,7 @@ function isOverdue(row) {
   return row.status === '待执行' && row.planStartAt && new Date(row.planStartAt) < new Date()
 }
 
-watch(() => props.tenant, () => { query.page = 1; load() })
+watch(() => props.tenant, () => controller.resetForTenant())
 onMounted(load)
 </script>
 
@@ -178,7 +175,9 @@ onMounted(load)
         <el-button type="primary" @click="openCreate">新建巡检批次</el-button>
       </div>
 
-      <el-table :data="rows" v-loading="loading" border stripe>
+      <div v-if="query.error" class="err list-error">{{ query.error }}</div>
+
+      <el-table :data="query.rows" v-loading="query.loading" border stripe>
         <el-table-column prop="batchNo" label="批次编号" width="160" />
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
@@ -204,12 +203,12 @@ onMounted(load)
         <el-pagination
           background
           layout="total, sizes, prev, pager, next, jumper"
-          :total="total"
+          :total="query.total"
           :page-sizes="[10, 20, 50]"
           v-model:current-page="query.page"
           v-model:page-size="query.size"
-          @current-change="load"
-          @size-change="search"
+          @current-change="onPageChange"
+          @size-change="onSizeChange"
         />
       </div>
     </div>

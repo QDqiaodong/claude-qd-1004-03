@@ -96,6 +96,16 @@ public class InspectionService {
 
     // ==================== 批次查询 ====================
 
+    /**
+     * 批次分页筛选。
+     *
+     * <p>参数语义与前端列表完全对齐：page 为 0 基页码、size 为每页条数；status 为空白等价于
+     * 「全部状态」，为非词典状态抛业务异常（统一错误结构）；keyword 为空白等价于不筛选，
+     * 否则按批次编号/负责人模糊匹配；overdueOnly=true 时在其它条件之上再叠加
+     * 「待执行且计划开始时间已过」，与 status/keyword 始终取交集。
+     * 三个筛选条件在同一条 SQL 内 AND，租户谓词由 @TenantId 自动追加，
+     * 翻页/改页大小只改变分页，不会改变筛选结果集。</p>
+     */
     @Transactional(readOnly = true)
     public Page<InspectionBatch> search(String status, String keyword, boolean overdueOnly, int page, int size) {
         if (status != null && status.isBlank()) {
@@ -108,9 +118,7 @@ public class InspectionService {
             keyword = null;
         }
         Pageable pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100));
-        return overdueOnly
-                ? batchRepository.searchOverduePending(keyword, java.time.LocalDateTime.now(), pageable)
-                : batchRepository.search(status, keyword, pageable);
+        return batchRepository.search(status, keyword, overdueOnly, LocalDateTime.now(), pageable);
     }
 
     @Transactional(readOnly = true)

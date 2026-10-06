@@ -514,4 +514,56 @@ class InspectionLifecycleTest extends BaseIntegrationTest {
         assertThat(inspectionService.search(null, null, true, 0, 10).getContent())
                 .extracting(InspectionBatch::getBatchNo).containsExactly("PAGE-A3");
     }
+
+    @Test
+    void overdue_only_must_keep_status_and_keyword_conditions_together() {
+        prepareSegment(TENANT_A, "PS-T70");
+        var segA = segmentRepository.findBySegCode("PS-T70").orElseThrow();
+        // 待执行·未过期 / 待执行·已过期 / 执行中（计划时间已过）/ 已关闭（计划时间已过）
+        createBatch(TENANT_A, "OD-FUTURE", LocalDateTime.now().plusDays(1),
+                List.of(ref(Dict.TARGET_PIPE_SEGMENT, segA.getId())));
+        createBatch(TENANT_A, "OD-PENDING", LocalDateTime.now().minusHours(1),
+                List.of(ref(Dict.TARGET_PIPE_SEGMENT, segA.getId())));
+        var running = createBatch(TENANT_A, "OD-RUNNING", LocalDateTime.now().minusDays(1),
+                List.of(ref(Dict.TARGET_PIPE_SEGMENT, segA.getId())));
+        running.setStatus(Dict.BATCH_RUNNING);
+        batchRepository.saveAndFlush(running);
+        var closed = createBatch(TENANT_A, "OD-CLOSED", LocalDateTime.now().minusDays(2),
+                List.of(ref(Dict.TARGET_PIPE_SEGMENT, segA.getId())));
+        closed.setStatus(Dict.BATCH_CLOSED);
+        batchRepository.saveAndFlush(closed);
+
+        useTenant(TENANT_A);
+        // 回归核心：overdueOnly 曾经走另一条 SQL 丢掉 status；组合「执行中 + 只看过期」必须为空，
+        // 不能把 OD-RUNNING 带出来
+        assertThat(inspectionService.search(Dict.BATCH_RUNNING, null, true, 0, 10).getContent())
+                .isEmpty();
+        assertThat(inspectionService.search(Dict.BATCH_CLOSED, null, true, 0, 10).getContent())
+                .isEmpty();
+
+        // status=待执行 + overdueOnly：交集只留真正过期未执行的一条
+        assertThat(inspectionService.search(Dict.BATCH_PENDING, null, true, 0, 10).getContent())
+                .extracting(InspectionBatch::getBatchNo).containsExactly("OD-PENDING");
+
+        // overdueOnly + 关键字取交集：未过期的待执行批次即使编号前缀相同也不命中
+        assertThat(inspectionService.search(null, "OD-F", true, 0, 10).getContent())
+                .extracting(InspectionBatch::getBatchNo).isEmpty();
+        assertThat(inspectionService.search(null, "OD-P", true, 0, 10).getContent())
+                .extracting(InspectionBatch::getBatchNo).containsExactly("OD-PENDING");
+
+        // overdueOnly + 分页：total 仍是筛选交集的真实数量
+        var page = inspectionService.search(Dict.BATCH_PENDING, null, true, 0, 1);
+        assertThat(page.getTotalElements()).isEqualTo(1);
+        assertThat(page.getTotalPages()).isEqualTo(1);
+    }
+
+    @Test
+    void invalid_status_should_throw_biz_exception_but_blank_means_all() {
+        useTenant(TENANT_A);
+        assertThatThrownBy(() -> inspectionService.search("不存在的状态", null, false, 0, 10))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("批次状态不合法");
+        // 空白状态等价于全部状态，不报错
+        assertThat(inspectionService.search("   ", "   ", false, 0, 10).getContent()).isEmpty();
+    }
 }
