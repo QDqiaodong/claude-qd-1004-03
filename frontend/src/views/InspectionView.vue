@@ -1,46 +1,20 @@
 <script setup>
-import { onMounted, reactive, ref, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../api'
 import BatchDetail from '../components/inspection/BatchDetail.vue'
 import { BATCH_STATUS, batchStatusTagType } from '../utils/inspection'
+import { useBatchList } from '../utils/useBatchList'
 
 const props = defineProps({ tenant: String })
 
-const rows = ref([])
-const loading = ref(false)
-const total = ref(0)
-const query = reactive({
-  status: '',
-  keyword: '',
-  overdueOnly: false,
-  page: 1,
-  size: 10
-})
+// 列表筛选/分页状态由 useBatchList 统一管理：
+// 关键字、状态、「只看过期」会随每次请求发出；翻页/改页大小不清条件；
+// 过期响应（含切租户前的在途请求）会被丢弃，不会混入列表。
+const { rows, loading, total, error, query, load, search, changePage, changeSize, resetPage } = useBatchList()
 
-async function load() {
-  loading.value = true
-  try {
-    const data = await api.listBatches({
-      status: query.status || undefined,
-      keyword: query.key || undefined,
-      overdueOnly: query.overdueOnly || undefined,
-      page: query.page - 1,
-      size: query.size
-    })
-    rows.value = data.items || []
-    total.value = data.total || 0
-  } catch (e) {
-    ElMessage.error(e.message)
-  } finally {
-    loading.value = false
-  }
-}
-
-function search() {
-  query.page = 1
-  load()
-}
+// 查询失败：保留用户已填条件，仅提示原因
+watch(error, (msg) => { if (msg) ElMessage.error(msg) })
 
 // ---------------- 详情抽屉 ----------------
 const detailVisible = ref(false)
@@ -148,7 +122,7 @@ function isOverdue(row) {
   return row.status === '待执行' && row.planStartAt && new Date(row.planStartAt) < new Date()
 }
 
-watch(() => props.tenant, () => { query.page = 1; load() })
+watch(() => props.tenant, () => { resetPage() })
 onMounted(load)
 </script>
 
@@ -208,8 +182,8 @@ onMounted(load)
           :page-sizes="[10, 20, 50]"
           v-model:current-page="query.page"
           v-model:page-size="query.size"
-          @current-change="load"
-          @size-change="search"
+          @current-change="changePage"
+          @size-change="changeSize"
         />
       </div>
     </div>

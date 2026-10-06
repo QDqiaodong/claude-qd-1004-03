@@ -98,18 +98,26 @@ public class InspectionService {
 
     @Transactional(readOnly = true)
     public Page<InspectionBatch> search(String status, String keyword, boolean overdueOnly, int page, int size) {
-        if (status != null && status.isBlank()) {
-            status = null;
+        if (status != null) {
+            status = status.trim();
+            if (status.isEmpty()) {
+                status = null;
+            }
         }
         if (status != null && !Dict.isValidBatchStatus(status)) {
             throw new BizException("批次状态不合法：" + status);
         }
-        if (keyword != null && keyword.isBlank()) {
-            keyword = null;
+        if (keyword != null) {
+            keyword = keyword.trim();
+            if (keyword.isEmpty()) {
+                keyword = null;
+            }
         }
         Pageable pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100));
+        // 「只看过期未执行」与状态/关键字取交集，租户条件由 @TenantId 自动追加——
+        // 任何组合都只可能命中当前租户的数据。
         return overdueOnly
-                ? batchRepository.searchOverduePending(keyword, java.time.LocalDateTime.now(), pageable)
+                ? batchRepository.searchOverduePending(status, keyword, java.time.LocalDateTime.now(), pageable)
                 : batchRepository.search(status, keyword, pageable);
     }
 

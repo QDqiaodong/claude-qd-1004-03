@@ -39,16 +39,21 @@ public interface InspectionBatchRepository extends JpaRepository<InspectionBatch
                                  @Param("keyword") String keyword,
                                  Pageable pageable);
 
-    /** 仅「待执行」且计划开始时间已过（过期未执行）的批次，供列表的「只看过期」筛选。 */
+    /**
+     * 仅「待执行」且计划开始时间已过（过期未执行）的批次，供列表的「只看过期」筛选。
+     * 与状态筛选取交集：勾选「只看过期」同时又选了非「待执行」状态时结果为空，而不是悄悄丢掉状态条件。
+     */
     @Query("""
             select b from InspectionBatch b
             where b.status = '待执行' and b.planStartAt < :now
+              and (:status is null or b.status = :status)
               and (:keyword is null
                    or b.batchNo like concat('%', :keyword, '%')
                    or b.ownerName like concat('%', :keyword, '%'))
             order by b.id desc
             """)
-    Page<InspectionBatch> searchOverduePending(@Param("keyword") String keyword,
+    Page<InspectionBatch> searchOverduePending(@Param("status") String status,
+                                               @Param("keyword") String keyword,
                                                @Param("now") java.time.LocalDateTime now,
                                                Pageable pageable);
 
